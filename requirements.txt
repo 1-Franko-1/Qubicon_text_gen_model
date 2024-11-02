@@ -1,4 +1,4 @@
 tensorflow
 numpy
-sklearn.model
-sklearn
+scikit-learn
+colorama

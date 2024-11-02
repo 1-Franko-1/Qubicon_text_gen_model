@@ -10,6 +10,15 @@ import json
 import os
 from sklearn.model_selection import train_test_split
 import concurrent.futures
+from colorama import Fore, Style, init
+
+# Initialize colorama
+init(autoreset=True)
+
+# Header with color
+print(Fore.CYAN + "=" * 128)
+print(Fore.CYAN + "=" * 48 + " QUBICON Text Generation PTTM-1 " + "=" * 48)
+print(Fore.CYAN + "=" * 128)
 
 # Disable oneDNN optimizations
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
@@ -362,6 +371,7 @@ def calculate_parameters(vocab_size, d_model, num_heads, num_layers, d_ff):
     return total_parameters
 
 #parameters
+num_epochs = 50
 d_model = 768
 num_heads = 12
 num_layers = 24
@@ -376,7 +386,6 @@ top_p=0.9
 length_penalty=1.0
 
 total_params = calculate_parameters(vocab_size, d_model, num_heads, num_layers, d_ff)
-print(f'Total Parameters: {total_params}')
 
 # Initialize the model
 model = TransformerModel(vocab_size, d_model=d_model, num_heads=num_heads, num_layers=num_layers, d_ff=d_ff, max_seq_length=max_seq_length, dropout=dropout)
@@ -385,6 +394,7 @@ model = TransformerModel(vocab_size, d_model=d_model, num_heads=num_heads, num_l
 optimizer = tf.keras.optimizers.Adam(learning_rate=0.001, clipnorm=1.0)
 criterion = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction=tf.keras.losses.Reduction.NONE)
 
+# Function to process each batch with color-coded messages for loss
 def process_batch(batch, model, optimizer, criterion, vocab_size):
     with tf.GradientTape() as tape:
         tgt = batch[:, 1:]
@@ -396,40 +406,49 @@ def process_batch(batch, model, optimizer, criterion, vocab_size):
         
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    
+    # Print loss with color
+    print(Fore.GREEN + f"Batch Loss: {loss.numpy():.4f}")
     return loss
 
 def train_model():
+    # Check for GPU availability and set the device accordingly
     if tf.config.list_physical_devices('GPU'):
         print("GPU is available and will be used for training.")
+        device_name = '/GPU:0'  # You can also use '/GPU:0' or '/GPU:1', etc., based on your setup
     else:
         print("GPU is not available. Training will be performed on the CPU.")
+        device_name = '/CPU:0'
+        
+    tf.config.optimizer.set_jit(True)  # Enable XLA
 
-    num_epochs = 10
     for epoch in range(num_epochs):
         total_loss = 0
         num_batches = 0
-        
-        # Training phase
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = []
-            for batch, attention_mask in train_tf_dataset:
-                futures.append(executor.submit(process_batch, batch, model, optimizer, criterion, vocab_size))
 
-            for future in concurrent.futures.as_completed(futures):
-                total_loss += future.result().numpy()  # Get the loss from each future
-                num_batches += 1
+        # Use the selected device context
+        with tf.device(device_name):
+            # Training phase
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = []
+                for batch, attention_mask in train_tf_dataset:
+                    futures.append(executor.submit(process_batch, batch, model, optimizer, criterion, vocab_size))
 
-        # Validation phase
-        val_loss = 0
-        num_val_batches = 0
-        for batch, attention_mask in val_tf_dataset:
-            tgt = batch[:, 1:]
-            output = model(batch[:, :-1], tgt)
-            output = tf.reshape(output, (-1, vocab_size))
-            tgt_batch = tf.reshape(tgt, (-1,))
-            loss = criterion(tgt_batch, output)
-            val_loss += tf.reduce_mean(loss).numpy()
-            num_val_batches += 1
+                for future in concurrent.futures.as_completed(futures):
+                    total_loss += future.result().numpy()  # Get the loss from each future
+                    num_batches += 1
+
+            # Validation phase
+            val_loss = 0
+            num_val_batches = 0
+            for batch, attention_mask in val_tf_dataset:
+                tgt = batch[:, 1:]
+                output = model(batch[:, :-1], tgt)
+                output = tf.reshape(output, (-1, vocab_size))
+                tgt_batch = tf.reshape(tgt, (-1,))
+                loss = criterion(tgt_batch, output)
+                val_loss += tf.reduce_mean(loss).numpy()
+                num_val_batches += 1
 
         avg_train_loss = total_loss / num_batches if num_batches > 0 else np.nan
         avg_val_loss = val_loss / num_val_batches if num_val_batches > 0 else np.nan
@@ -459,12 +478,13 @@ else:
 
 # During inference (modify chat_with_ai)
 def chat_with_ai():
-    print("Welcome to the AI chat! Type 'exit' to end the conversation.")
+    print(Fore.GREEN + f'Total Parameters: {total_params}')
+    print(Fore.GREEN + "Welcome to the AI chat! Type 'exit' to end the conversation.")
     while True:
-        user_input = input("You: ")
+        user_input = input(Fore.CYAN + "You: ")
         
         if user_input.lower() == 'exit':
-            print("Ending the chat. Goodbye!")
+            print(Fore.RED + "Ending the chat. Goodbye!")
             break
         
         # Tokenize the user input
@@ -486,7 +506,7 @@ def chat_with_ai():
 
         # Detokenize the generated response
         response_text = detokenize(generated_response, token_to_word)
-        print("Model: ", response_text)
+        print(Fore.GREEN + f"Model:{response_text.replace('<start>', '')}")
 
 # Call the chat function to start the conversation
 chat_with_ai()
