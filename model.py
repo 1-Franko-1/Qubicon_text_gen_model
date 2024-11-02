@@ -10,10 +10,6 @@ import json
 import os
 from sklearn.model_selection import train_test_split
 import concurrent.futures
-from tensorflow.keras.mixed_precision import experimental as mixed_precision
-
-policy = mixed_precision.Policy('mixed_float16')
-mixed_precision.set_policy(policy)
 
 # Disable oneDNN optimizations
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
