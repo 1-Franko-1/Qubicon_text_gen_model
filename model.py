@@ -212,7 +212,7 @@ class TextDataset(torch.utils.data.Dataset):
         return torch.tensor(sequence, dtype=torch.long)
 
 # Load the knowledge base from a JSON file
-with open('data.json', 'r') as f:
+with open('50kdataset.json', 'r') as f:
     knowledge_base = json.load(f)
 
 # Create word-to-token and token-to-word mappings
