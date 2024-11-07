@@ -1,4 +1,5 @@
-tensorflow
+torch
 numpy
 scikit-learn
+tqdm
 colorama

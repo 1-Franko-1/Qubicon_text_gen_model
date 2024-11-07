@@ -28,8 +28,8 @@ model_save_path = "PTTM_1.pth"
 def select_parameters():
     print("\nPlease select the model configuration based on your system's capabilities:")
     print("1. High-end (2.5 billion parameters)")
-    print("2. Mid-range (750 million parameters)")
-    print("3. Low-end (for low-end computers)")
+    print("2. Mid-range (352.82 million parameters)")
+    print("3. Low-end (44.19 million parameters)")
     
     choice = input("Enter the number corresponding to your choice: ")
     
@@ -91,10 +91,10 @@ def select_parameters():
         grad_clip = 1.0
 
     # Return the selected configuration
-    return num_epochs, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip
+    return d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip
 
 # Call the function to select parameters
-num_epochs, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip = select_parameters()
+d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip = select_parameters()
 
 num_epochs = 500
 max_len = 100
@@ -396,19 +396,33 @@ model.to(device)
 
 criterion = nn.CrossEntropyLoss(ignore_index=0)
 
+# Training Loop
 def train_epoch():
     model.train()
     total_loss = 0
     for batch in tqdm(train_loader, desc="Training"):
         optimizer.zero_grad()
+        
+        # Source (input sequence) and Target (next-word prediction)
         src = batch[:, :-1].to(device)
         tgt = batch[:, 1:].to(device)
+        
+        # Forward pass: predict next word
         output = model(src, tgt)
+        
+        # Calculate loss based on next-word prediction
         loss = criterion(output.reshape(-1, vocab_size), tgt.reshape(-1))
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
+        # Clip gradients to prevent exploding gradients
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
+        
+        # Optimization step
         optimizer.step()
+        
+        # Accumulate loss
         total_loss += loss.item()
+        
     return total_loss / len(train_loader)
 
 # Initialize the model
