@@ -6,6 +6,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import json
@@ -21,21 +22,83 @@ print(Fore.CYAN + "=" * 48 + " QUBICON Text Generation PTTM-1 " + "=" * 48)
 print(Fore.CYAN + "=" * 128)
 print(Fore.WHITE)
 
-# Parameters!
-d_model = 512  # Dimensionality of the model
-num_heads = 8  # Number of attention heads in each MultiHeadAttention layer
-num_layers = 6  # Number of encoder and decoder layers
-d_ff = 2048  # Dimensionality of the feedforward layer
-max_seq_length = 150  # Maximum sequence length for inputs
-dropout = 0.1  # Dropout rate to prevent overfitting
-learning_rate = 1e-4  # Learning rate for the optimizer
-batch_size = 64  # Batch size for training
-num_epochs = 15  # Number of training epochs
-beam_width = 3  # Beam width for beam search during text generation
-temperature = 0.7  # Temperature for controlling randomness in generation
-max_len = 50  # Maximum length for generated sequences
-weight_decay = 1e-5  # Weight decay for L2 regularization
-grad_clip = 1.0  # Gradient clipping to prevent exploding gradients
+# Define the model save path
+model_save_path = "PTTM_1.pth"
+
+def select_parameters():
+    print("\nPlease select the model configuration based on your system's capabilities:")
+    print("1. High-end (2.5 billion parameters)")
+    print("2. Mid-range (750 million parameters)")
+    print("3. Low-end (for low-end computers)")
+    
+    choice = input("Enter the number corresponding to your choice: ")
+    
+    if choice == '1':
+        # High-end configuration
+        d_model = 2048
+        num_heads = 32
+        num_layers = 24
+        d_ff = 8192
+        max_seq_length = 150
+        dropout = 0.1
+        learning_rate = 1e-4
+        batch_size = 64
+        beam_width = 3
+        temperature = 0.7
+        weight_decay = 1e-5
+        grad_clip = 1.0
+    elif choice == '2':
+        # Mid-range configuration
+        d_model = 1024
+        num_heads = 16
+        num_layers = 12
+        d_ff = 4096
+        max_seq_length = 150
+        dropout = 0.1
+        learning_rate = 1e-4
+        batch_size = 64
+        beam_width = 3
+        temperature = 0.7
+        weight_decay = 1e-5
+        grad_clip = 1.0
+    elif choice == '3':
+        # Low-end configuration
+        d_model = 512
+        num_heads = 8
+        num_layers = 6
+        d_ff = 2048
+        max_seq_length = 300
+        dropout = 0.1
+        learning_rate = 1e-4
+        batch_size = 64
+        beam_width = 3
+        temperature = 0.7
+        weight_decay = 1e-5
+        grad_clip = 1.0
+    else:
+        print("Invalid choice, defaulting to mid-range configuration.")
+        d_model = 1024
+        num_heads = 16
+        num_layers = 12
+        d_ff = 4096
+        max_seq_length = 150
+        dropout = 0.1
+        learning_rate = 1e-4
+        batch_size = 64
+        beam_width = 3
+        temperature = 0.7
+        weight_decay = 1e-5
+        grad_clip = 1.0
+
+    # Return the selected configuration
+    return num_epochs, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip
+
+# Call the function to select parameters
+num_epochs, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip = select_parameters()
+
+num_epochs = 500
+max_len = 100
+datasetfile = '50kdataset.json'  # Dataset file
 
 # Define the MultiHeadAttention class
 class MultiHeadAttention(nn.Module):
@@ -180,12 +243,87 @@ class TransformerModel(nn.Module):
         
         return self.fc(emb_tgt)
 
+    # Token sampling function for generating next token
+    def sample_next_token(self, logits, temperature=1.0, top_k=0, top_p=0.0):
+        # Apply temperature scaling
+        if temperature != 1.0:
+            logits = logits / temperature
+        
+        # Ensure top_k is within the range of the vocabulary size
+        if top_k > 0:
+            top_k = min(top_k, logits.size(-1))  # Ensure top_k is not greater than the vocabulary size
+            values, indices = torch.topk(logits, k=top_k)
+            logits = torch.zeros_like(logits).scatter_(-1, indices, values)
+        
+        # Top-p (nucleus) sampling
+        if top_p > 0.0:
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+            sorted_indices_to_remove = cumulative_probs > top_p
+            sorted_logits[sorted_indices_to_remove] = -float('Inf')
+            logits = torch.zeros_like(logits).scatter_(-1, sorted_indices, sorted_logits)
+        
+        # Clip logits to prevent overflow and NaN values
+        logits = torch.clamp(logits, min=-100.0, max=100.0)  # Clip logits to a safe range
+
+        # Apply softmax to convert logits to probabilities
+        probs = F.softmax(logits, dim=-1)
+
+        # Check if any probability is invalid (NaN or negative)
+        if torch.any(torch.isnan(probs)) or torch.any(probs < 0):
+            raise ValueError("Invalid probabilities detected: contains NaN or negative values")
+
+        # Sample from the processed logit distribution
+        next_token = torch.multinomial(probs, 1).item()
+        
+        return next_token
+
+    # Beam search for text generation
+    def beam_search(self, src, start_token=1, beam_width=3, max_len=50, temperature=1.0, top_k=50, top_p=0.9, length_penalty=1.0):
+        self.eval()
+        beams = [(torch.tensor([start_token]).unsqueeze(0), 0)]  # (sequence, score)
+        
+        for _ in range(max_len):
+            all_candidates = []
+            
+            for seq, score in beams:
+                seq_len = seq.size(1)
+                tgt_mask = self.generate_nopeak_mask(seq_len)
+                output = self(src, seq, tgt_mask=tgt_mask)  # Self-attention decoding
+                logits = output[0, -1]  # Get logits for the last token
+                
+                # Sample next token with temperature, top_k, and top_p constraints
+                next_token = self.sample_next_token(logits, temperature, top_k, top_p)
+                
+                candidate_seq = torch.cat([seq, torch.tensor([[next_token]]).to(seq.device)], dim=1)
+                
+                next_token_prob = F.softmax(logits, dim=-1)[next_token]
+                candidate_score = score - torch.log(next_token_prob).item()
+                candidate_score /= (len(candidate_seq[0]) ** length_penalty)  # Apply length penalty
+                
+                all_candidates.append((candidate_seq, candidate_score))
+
+            # Sort all candidates by score and keep only the top `beam_width`
+            beams = sorted(all_candidates, key=lambda x: x[1])[:beam_width]
+        
+        best_sequence = beams[0][0].squeeze(0).tolist()  # Get the best sequence
+        return best_sequence
+
+    # Helper function to generate a no-peak mask for the target sequence
+    def generate_nopeak_mask(self, size):
+        mask = torch.triu(torch.ones(size, size), diagonal=1).bool()
+        return mask
+
 # Tokenization and detokenization functions
 def tokenize(text, word_to_token):
     return [word_to_token.get(word, 0) for word in text.split()]
 
 def detokenize(tokens, token_to_word):
     return ' '.join([token_to_word.get(token, '') for token in tokens if token != 0])
+
+def count_parameters(model):
+    total_params = sum(p.numel() for p in model.parameters())
+    return total_params
 
 # Define a Dataset class for the text data
 class TextDataset(torch.utils.data.Dataset):
@@ -212,7 +350,7 @@ class TextDataset(torch.utils.data.Dataset):
         return torch.tensor(sequence, dtype=torch.long)
 
 # Load the knowledge base from a JSON file
-with open('50kdataset.json', 'r') as f:
+with open(datasetfile, 'r') as f:
     knowledge_base = json.load(f)
 
 # Create word-to-token and token-to-word mappings
@@ -277,8 +415,9 @@ def train_epoch():
 vocab_size = len(word_to_token)
 model = TransformerModel(vocab_size, d_model=d_model, num_heads=num_heads, num_layers=num_layers, d_ff=d_ff, max_seq_length=max_seq_length, dropout=dropout)
 
-# Define the model save path
-model_save_path = "PTTM_1.pth"
+# Count parameters
+total_params = count_parameters(model)
+print(f"Total number of parameters in the model: {total_params / 1e6:.2f} million")
 
 # Check if pretrained model exists
 if os.path.exists(model_save_path):
@@ -318,35 +457,12 @@ else:
     # Training Loop
     for epoch in range(num_epochs):
         train_loss = train_epoch()
-        print(f"Epoch {epoch + 1}, Loss: {train_loss}")
+        print(f"Epoch {epoch + 1} / {num_epochs}, Loss: {train_loss}")
         scheduler.step()
 
     # Save the model after training
     torch.save(model.state_dict(), model_save_path)
     print(f"Model saved to {model_save_path}")
-
-# Beam Search for Text Generation
-def beam_search(model, start_token, word_to_token, token_to_word, beam_width=beam_width, max_len=max_len):
-    model.eval()
-    tokens = [start_token]
-    current_beam = [(tokens, 0)]  # (sequence, score)
-    
-    for _ in range(max_len):
-        all_candidates = []
-        for seq, score in current_beam:
-            input_seq = torch.tensor(seq).unsqueeze(0).to(device)
-            output = model(input_seq, input_seq)  # Self-attention decoding
-            probs = torch.nn.functional.softmax(output[0, -1] / temperature, dim=-1)
-            top_probs, top_tokens = probs.topk(beam_width)
-            
-            for prob, token in zip(top_probs, top_tokens):
-                candidate = (seq + [token.item()], score - torch.log(prob).item())  # Minimize negative log-likelihood
-                all_candidates.append(candidate)
-        
-        current_beam = sorted(all_candidates, key=lambda x: x[1])[:beam_width]
-        tokens = current_beam[0][0]  # Best sequence
-
-    return detokenize(tokens[1:], token_to_word)
 
 # Chat Interface
 def chat_with_ai():
@@ -358,14 +474,20 @@ def chat_with_ai():
         
         # Run model inference without gradients
         with torch.no_grad():
-            # Pass the tokenized input to the model
-            output = model(tokenized_input, tokenized_input)
-            
-            # Get the predicted token indices (after applying argmax)
-            predicted_tokens = output.argmax(dim=-1).squeeze(0).tolist()
+            # Use beam search for text generation
+            best_sequence = model.beam_search(
+                src=tokenized_input, 
+                start_token=1,  # Assuming <start> token is 1
+                beam_width=beam_width, 
+                max_len=max_len, 
+                temperature=temperature, 
+                top_k=50, 
+                top_p=0.9, 
+                length_penalty=1.0
+            )
         
         # Detokenize the predicted tokens (skip <start> token, index 1)
-        response = detokenize(predicted_tokens[1:], token_to_word)
+        response = detokenize(best_sequence[1:], token_to_word)  # Skipping <start> token
         print(f"AI: {response}")
 
 # Start the chat
