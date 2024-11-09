@@ -1,6 +1,6 @@
 """
 =======================================================================================================================================
-=                                                               PTTM-1                                                                =
+=                                                          VersaGen Text Gen                                                          =
 =======================================================================================================================================
 """
 
@@ -20,7 +20,7 @@ from colorama import Fore, Style, init
 
 # Header with color
 print(Fore.CYAN + "=" * 128)
-print(Fore.CYAN + "=" * 48 + " QUBICON Text Generation PTTM-1 " + "=" * 48)
+print(Fore.CYAN + "=" + " " * 53 + " VersaGen Text Gen " + " " * 54 + "=")
 print(Fore.CYAN + "=" * 128)
 print(Fore.WHITE)
 
