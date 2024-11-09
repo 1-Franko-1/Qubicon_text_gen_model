@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import json
+import math
 import os
 from collections import defaultdict
 import re
@@ -98,9 +99,9 @@ def select_parameters():
 # Call the function to select parameters
 d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip = select_parameters()
 
-num_epochs = 50
+num_epochs = 10
 max_len = 100
-datasetfile = '50kdataset.json'  # Dataset file
+datasetfile = 'data.json'  # Dataset file
 
 # Define the MultiHeadAttention class
 class MultiHeadAttention(nn.Module):
@@ -119,6 +120,10 @@ class MultiHeadAttention(nn.Module):
     def scaled_dot_product_attention(self, Q, K, V, mask=None):
         attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / np.sqrt(self.d_k)
         if mask is not None:
+            mask = mask.unsqueeze(0)  # Add the batch dimension
+            mask = mask.unsqueeze(1)  # Add the head dimension, if needed (for multi-head attention)
+
+            # Now, the mask shape should align with the attention scores
             attn_scores += (mask * -1e9)
         attn_probs = torch.nn.functional.softmax(attn_scores, dim=-1)
         output = torch.matmul(attn_probs, V)
@@ -177,23 +182,6 @@ class PositionalEncoding(nn.Module):
         pos_encodings = self.positional_encoding[:seq_len, :]
         return x + pos_encodings.unsqueeze(0)
 
-# Define the EncoderLayer class
-class EncoderLayer(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, dropout):
-        super(EncoderLayer, self).__init__()
-        self.attn = MultiHeadAttention(d_model, num_heads)
-        self.ffn = PositionWiseFeedForward(d_model, d_ff)
-        self.layer_norm1 = nn.LayerNorm(d_model)
-        self.layer_norm2 = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x, mask):
-        attn_output = self.attn(x, x, x, mask)
-        x = self.layer_norm1(x + self.dropout(attn_output))
-        ffn_output = self.ffn(x)
-        x = self.layer_norm2(x + self.dropout(ffn_output))
-        return x
-
 # Define the DecoderLayer class
 class DecoderLayer(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, dropout):
@@ -227,35 +215,29 @@ class TransformerModel(nn.Module):
         self.max_seq_length = max_seq_length
         self.dropout_rate = dropout
         
+        # Only keep embedding, positional encoding, and decoder layers
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.positional_encoding = PositionalEncoding(d_model, max_len=max_seq_length)
-        self.encoder_layers = nn.ModuleList([EncoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)])
         self.decoder_layers = nn.ModuleList([DecoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)])
         self.fc = nn.Linear(d_model, vocab_size)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None):
-        emb_src = self.dropout(self.positional_encoding(self.embedding(src)))
-        for layer in self.encoder_layers:
-            emb_src = layer(emb_src, src_mask)
-        
+    def forward(self, tgt, tgt_mask=None):
         emb_tgt = self.dropout(self.positional_encoding(self.embedding(tgt)))
+        
         for layer in self.decoder_layers:
-            emb_tgt = layer(emb_tgt, emb_src, src_mask, tgt_mask)
+            emb_tgt = layer(emb_tgt, emb_tgt, tgt_mask, tgt_mask)  # Only use the target (no encoder input)
         
         return self.fc(emb_tgt)
 
-    # Token sampling function for generating next token
     def sample_next_token(self, logits, temperature=1.0, top_k=0, top_p=0.0):
-        # Apply temperature scaling
+        # Sample token from the logits (same function as before)
         if temperature != 1.0:
             logits = logits / temperature
         
-        # Set the <pad> token's logits to a very negative value so it doesn't get selected
         pad_token_id = word_to_token['<pad>']
         logits[pad_token_id] = -float('Inf')  # Ensure padding token is not selected
         
-        # Apply top-k and top-p sampling if required
         if top_k > 0:
             top_k = min(top_k, logits.size(-1))  # Ensure top_k is not greater than vocab size
             values, indices = torch.topk(logits, k=top_k)
@@ -281,13 +263,14 @@ class TransformerModel(nn.Module):
         tokens = torch.tensor(tokenize(prompt, word_to_token), dtype=torch.long).unsqueeze(0).to(device)
         
         generated = tokens  # Start with the prompt (initial tokens)
-        
-        for _ in range(max_len):
+
+        # Create a progress bar for token generation
+        for _ in tqdm(range(max_len), desc="Generating text", ncols=100):
             seq_len = generated.size(1)
             tgt_mask = self.generate_nopeak_mask(seq_len)  # Generate the target mask
             
             # Get the logits from the model for the current generated sequence
-            output = self(generated, generated, tgt_mask=tgt_mask)  # Decode with the prompt as input
+            output = self(generated, tgt_mask=tgt_mask)  # Only use the target (no encoder input)
             logits = output[0, -1]  # Get logits for the last token
             
             # Sample the next token based on temperature, top_k, and top_p
@@ -300,10 +283,9 @@ class TransformerModel(nn.Module):
         generated_text = detokenize(generated.squeeze(0).tolist(), token_to_word)
         return generated_text
 
-    # Helper function to generate a no-peak mask for the target sequence
     def generate_nopeak_mask(self, size):
         mask = torch.triu(torch.ones(size, size), diagonal=1).bool()
-        return mask
+        return mask.to(device)
 
 def tokenize(text, subword_vocab):
     tokens = []
