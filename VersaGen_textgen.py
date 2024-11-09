@@ -100,7 +100,7 @@ d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, ba
 
 num_epochs = 50
 max_len = 100
-datasetfile = 'data.json'  # Dataset file
+datasetfile = '50kdataset.json'  # Dataset file
 
 # Define the MultiHeadAttention class
 class MultiHeadAttention(nn.Module):
