@@ -1,6 +1,6 @@
 """
 =======================================================================================================================================
-==================================================== QUBICON Text Generation PTTM-1 ===================================================
+=                                                               PTTM-1                                                                =
 =======================================================================================================================================
 """
 
@@ -11,6 +11,8 @@ import torch.optim as optim
 import numpy as np
 import json
 import os
+from collections import defaultdict
+import re
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from torch.optim.lr_scheduler import StepLR
@@ -96,9 +98,9 @@ def select_parameters():
 # Call the function to select parameters
 d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip = select_parameters()
 
-num_epochs = 500
+num_epochs = 50
 max_len = 100
-datasetfile = '50kdataset.json'  # Dataset file
+datasetfile = 'data.json'  # Dataset file
 
 # Define the MultiHeadAttention class
 class MultiHeadAttention(nn.Module):
@@ -249,13 +251,16 @@ class TransformerModel(nn.Module):
         if temperature != 1.0:
             logits = logits / temperature
         
-        # Ensure top_k is within the range of the vocabulary size
+        # Set the <pad> token's logits to a very negative value so it doesn't get selected
+        pad_token_id = word_to_token['<pad>']
+        logits[pad_token_id] = -float('Inf')  # Ensure padding token is not selected
+        
+        # Apply top-k and top-p sampling if required
         if top_k > 0:
-            top_k = min(top_k, logits.size(-1))  # Ensure top_k is not greater than the vocabulary size
+            top_k = min(top_k, logits.size(-1))  # Ensure top_k is not greater than vocab size
             values, indices = torch.topk(logits, k=top_k)
             logits = torch.zeros_like(logits).scatter_(-1, indices, values)
         
-        # Top-p (nucleus) sampling
         if top_p > 0.0:
             sorted_logits, sorted_indices = torch.sort(logits, descending=True)
             cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -263,63 +268,75 @@ class TransformerModel(nn.Module):
             sorted_logits[sorted_indices_to_remove] = -float('Inf')
             logits = torch.zeros_like(logits).scatter_(-1, sorted_indices, sorted_logits)
         
-        # Clip logits to prevent overflow and NaN values
-        logits = torch.clamp(logits, min=-100.0, max=100.0)  # Clip logits to a safe range
-
-        # Apply softmax to convert logits to probabilities
+        logits = torch.clamp(logits, min=-100.0, max=100.0)
         probs = F.softmax(logits, dim=-1)
-
-        # Check if any probability is invalid (NaN or negative)
-        if torch.any(torch.isnan(probs)) or torch.any(probs < 0):
-            raise ValueError("Invalid probabilities detected: contains NaN or negative values")
-
-        # Sample from the processed logit distribution
         next_token = torch.multinomial(probs, 1).item()
-        
+
         return next_token
 
-    # Beam search for text generation
-    def beam_search(self, src, start_token=1, beam_width=3, max_len=50, temperature=1.0, top_k=50, top_p=0.9, length_penalty=1.0):
-        self.eval()
-        beams = [(torch.tensor([start_token]).unsqueeze(0), 0)]  # (sequence, score)
+    def generate_text(self, prompt, max_len=50, temperature=1.0, top_k=50, top_p=0.9):
+        self.eval()  # Set the model to evaluation mode
+        
+        # Tokenize the input prompt
+        tokens = torch.tensor(tokenize(prompt, word_to_token), dtype=torch.long).unsqueeze(0).to(device)
+        
+        generated = tokens  # Start with the prompt (initial tokens)
         
         for _ in range(max_len):
-            all_candidates = []
+            seq_len = generated.size(1)
+            tgt_mask = self.generate_nopeak_mask(seq_len)  # Generate the target mask
             
-            for seq, score in beams:
-                seq_len = seq.size(1)
-                tgt_mask = self.generate_nopeak_mask(seq_len)
-                output = self(src, seq, tgt_mask=tgt_mask)  # Self-attention decoding
-                logits = output[0, -1]  # Get logits for the last token
-                
-                # Sample next token with temperature, top_k, and top_p constraints
-                next_token = self.sample_next_token(logits, temperature, top_k, top_p)
-                
-                candidate_seq = torch.cat([seq, torch.tensor([[next_token]]).to(seq.device)], dim=1)
-                
-                next_token_prob = F.softmax(logits, dim=-1)[next_token]
-                candidate_score = score - torch.log(next_token_prob).item()
-                candidate_score /= (len(candidate_seq[0]) ** length_penalty)  # Apply length penalty
-                
-                all_candidates.append((candidate_seq, candidate_score))
-
-            # Sort all candidates by score and keep only the top `beam_width`
-            beams = sorted(all_candidates, key=lambda x: x[1])[:beam_width]
+            # Get the logits from the model for the current generated sequence
+            output = self(generated, generated, tgt_mask=tgt_mask)  # Decode with the prompt as input
+            logits = output[0, -1]  # Get logits for the last token
+            
+            # Sample the next token based on temperature, top_k, and top_p
+            next_token = self.sample_next_token(logits, temperature, top_k, top_p)
+            
+            # Append the next token to the generated sequence
+            generated = torch.cat([generated, torch.tensor([[next_token]]).to(device)], dim=1)
         
-        best_sequence = beams[0][0].squeeze(0).tolist()  # Get the best sequence
-        return best_sequence
+        # Convert generated token IDs back to words
+        generated_text = detokenize(generated.squeeze(0).tolist(), token_to_word)
+        return generated_text
 
     # Helper function to generate a no-peak mask for the target sequence
     def generate_nopeak_mask(self, size):
         mask = torch.triu(torch.ones(size, size), diagonal=1).bool()
         return mask
 
-# Tokenization and detokenization functions
-def tokenize(text, word_to_token):
-    return [word_to_token.get(word, 0) for word in text.split()]
+def tokenize(text, subword_vocab):
+    tokens = []
+    for word in text.split():
+        if word in subword_vocab:
+            tokens.append(subword_vocab[word])
+        else:
+            # Split OOV words into subwords by character
+            tokens.extend(subword_vocab.get(char, 0) for char in word)
+    return tokens
 
-def detokenize(tokens, token_to_word):
-    return ' '.join([token_to_word.get(token, '') for token in tokens if token != 0])
+def detokenize(tokens, idx_to_word):
+    words = []
+    
+    for token in tokens:
+        word = idx_to_word.get(token, '')
+
+        # Skip <start> and <pad> tokens
+        if word == '<start>' or word == '<pad>':
+            continue
+
+        # If the token represents a recognized word/subword, add it as-is.
+        if word:
+            if word.startswith("▁"):
+                words.append(word.replace("▁", " "))  # Handle subword token correctly
+            else:
+                words.append(" " + word)  # Add space before word if no subword marker
+        else:
+            continue
+
+    # Join words and handle excessive whitespace
+    text = ''.join(words).strip()
+    return re.sub(r'\s+', ' ', text)  # Clean up any extra spaces
 
 def count_parameters(model):
     total_params = sum(p.numel() for p in model.parameters())
@@ -483,26 +500,10 @@ def chat_with_ai():
     while True:
         user_input = input("You: ")
         
-        # Tokenize input and add batch dimension, ensure dtype is long
-        tokenized_input = torch.tensor(tokenize(user_input, word_to_token), dtype=torch.long).unsqueeze(0).to(device)
+        # Generate text based on the user input
+        generated_text = model.generate_text(user_input, max_len=50, temperature=0.7, top_k=50, top_p=0.9)
         
-        # Run model inference without gradients
-        with torch.no_grad():
-            # Use beam search for text generation
-            best_sequence = model.beam_search(
-                src=tokenized_input, 
-                start_token=1,  # Assuming <start> token is 1
-                beam_width=beam_width, 
-                max_len=max_len, 
-                temperature=temperature, 
-                top_k=50, 
-                top_p=0.9, 
-                length_penalty=1.0
-            )
+        print(f"AI: {generated_text}")
         
-        # Detokenize the predicted tokens (skip <start> token, index 1)
-        response = detokenize(best_sequence[1:], token_to_word)  # Skipping <start> token
-        print(f"AI: {response}")
-
 # Start the chat
 chat_with_ai()
