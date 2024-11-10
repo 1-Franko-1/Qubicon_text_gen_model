@@ -1,6 +1,6 @@
 """
 =======================================================================================================================================
-=                                                          VersaGen Text Gen                                                          =
+=                                                       VersaGen TEXT GENERATION                                                      =
 =======================================================================================================================================
 """
 
@@ -42,7 +42,6 @@ def select_parameters():
         num_heads = 32
         num_layers = 24
         d_ff = 8192
-        max_seq_length = 150
         dropout = 0.1
         learning_rate = 1e-4
         batch_size = 64
@@ -56,7 +55,6 @@ def select_parameters():
         num_heads = 16
         num_layers = 12
         d_ff = 4096
-        max_seq_length = 150
         dropout = 0.1
         learning_rate = 1e-4
         batch_size = 64
@@ -70,7 +68,6 @@ def select_parameters():
         num_heads = 8
         num_layers = 6
         d_ff = 2048
-        max_seq_length = 300
         dropout = 0.1
         learning_rate = 1e-4
         batch_size = 64
@@ -79,28 +76,18 @@ def select_parameters():
         weight_decay = 1e-5
         grad_clip = 1.0
     else:
-        print("Invalid choice, defaulting to mid-range configuration.")
-        d_model = 1024
-        num_heads = 16
-        num_layers = 12
-        d_ff = 4096
-        max_seq_length = 150
-        dropout = 0.1
-        learning_rate = 1e-4
-        batch_size = 64
-        beam_width = 3
-        temperature = 0.7
-        weight_decay = 1e-5
-        grad_clip = 1.0
+        print("Invalid choice")
+        exit()
 
     # Return the selected configuration
-    return d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip
+    return d_model, num_heads, num_layers, d_ff, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip
 
 # Call the function to select parameters
-d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip = select_parameters()
+d_model, num_heads, num_layers, d_ff, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip = select_parameters()
 
 num_epochs = 10
 max_len = 100
+max_seq_length = 300
 datasetfile = 'data.json'  # Dataset file
 
 # Define the MultiHeadAttention class
@@ -120,11 +107,9 @@ class MultiHeadAttention(nn.Module):
     def scaled_dot_product_attention(self, Q, K, V, mask=None):
         attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / np.sqrt(self.d_k)
         if mask is not None:
-            mask = mask.unsqueeze(0)  # Add the batch dimension
-            mask = mask.unsqueeze(1)  # Add the head dimension, if needed (for multi-head attention)
-
-            # Now, the mask shape should align with the attention scores
-            attn_scores += (mask * -1e9)
+            mask = mask.unsqueeze(0)  # Add a batch dimension if missing
+            attn_scores += mask * -1e9
+            
         attn_probs = torch.nn.functional.softmax(attn_scores, dim=-1)
         output = torch.matmul(attn_probs, V)
         return output
