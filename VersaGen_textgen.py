@@ -21,23 +21,70 @@ from colorama import Fore, Style, init
 
 # Header with color
 print(Fore.CYAN + "=" * 128)
-print(Fore.CYAN + "=" + " " * 53 + " VersaGen Text Gen " + " " * 54 + "=")
-print(Fore.CYAN + "=" * 128)
-print(Fore.WHITE)
+print(Fore.CYAN + "=" + " " * 126 + "=")
+print(Fore.CYAN + "=" + " " * 53 + Fore.WHITE + " VersaGen Text Gen " + Fore.BLUE + " " * 54 + "=")
+print(Fore.CYAN + "=" + " " * 126 + "=")
+print(Fore.CYAN + "=" * 128 + Fore.WHITE)
 
 # Define the model save path
-model_save_path = "PTTM_1.pth"
+model_save_path = "VersaGen_textmodel.pth"
 
 def select_parameters():
-    print("\nPlease select the model configuration based on your system's capabilities:")
-    print("1. High-end (2.5 billion parameters)")
-    print("2. Mid-range (352.82 million parameters)")
-    print("3. Low-end (44.19 million parameters)")
-    
-    choice = input("Enter the number corresponding to your choice: ")
+    print(Fore.CYAN + "=" + " " * 126 + "=")
+    print(Fore.CYAN + "=" + " " * 26 + Fore.WHITE + "Please select the model configuration based on your system's capabilities:" + Fore.CYAN + " " * 26 + "=")
+    print(Fore.CYAN + "=" + " " * 45 + Fore.RED + "1. Impossible (~2 trilion parameters)" + Fore.CYAN + " " * 44 + "=")
+    print(Fore.CYAN + "=" + " " * 45 + Fore.RED + "2. Ultra (~50 billion parameters)" + Fore.CYAN + " " * 48 + "=")
+    print(Fore.CYAN + "=" + " " * 45 + Fore.YELLOW + "3. High (~7.5 billion parameters)" + Fore.CYAN + " " * 48 + "=")
+    print(Fore.CYAN + "=" + " " * 45 + Fore.YELLOW + "4. Mid (~1.6 billion parameters)" + Fore.CYAN + " " * 49 + "=")
+    print(Fore.CYAN + "=" + " " * 45 + Fore.GREEN + "5. Low (~600 million parameters)" + Fore.CYAN + " " * 49 + "=")
+    print(Fore.CYAN + "=" + " " * 45 + Fore.GREEN + "6. Ultra Low (~25 million parameters)" + Fore.CYAN + " " * 44 + "=")
+    print(Fore.CYAN + "=" + " " * 126 + "=")
+    print(Fore.CYAN + "=" * 128)
+    print(Fore.CYAN + "=" + " " * 126 + "=")
+
+    choice = input(Fore.CYAN + "= " + Fore.WHITE + "Enter the number corresponding to your choice: ")
+
+    print(Fore.CYAN + "=" + " " * 126 + "=")
+    print(Fore.CYAN + "=" * 128 + Fore.WHITE)
     
     if choice == '1':
-        # High-end configuration
+        # Impossible configuration (~2 trillion parameters)
+        d_model = 20000
+        num_heads = 256
+        num_layers = 160
+        d_ff = 80000
+        dropout = 0.1
+        learning_rate = 1e-4
+        batch_size = 32
+        temperature = 0.7
+        weight_decay = 1e-5
+        grad_clip = 1.0
+    elif choice == '2':
+        # Ultra configuration (~50 billion parameters)
+        d_model = 8192   
+        num_heads = 128
+        num_layers = 80
+        d_ff = 32768
+        dropout = 0.1
+        learning_rate = 1e-4
+        batch_size = 32
+        temperature = 0.7
+        weight_decay = 1e-5
+        grad_clip = 1.0
+    elif choice == '3':
+        # High configuration (~7.5 billion parameters)
+        d_model = 4096
+        num_heads = 64
+        num_layers = 48
+        d_ff = 16384
+        dropout = 0.1
+        learning_rate = 1e-4
+        batch_size = 32
+        temperature = 0.7
+        weight_decay = 1e-5
+        grad_clip = 1.0
+    elif choice == '4':
+        # Mid configuration (~1.5 billion parameters)
         d_model = 2048
         num_heads = 32
         num_layers = 24
@@ -45,33 +92,30 @@ def select_parameters():
         dropout = 0.1
         learning_rate = 1e-4
         batch_size = 64
-        beam_width = 3
         temperature = 0.7
         weight_decay = 1e-5
         grad_clip = 1.0
-    elif choice == '2':
-        # Mid-range configuration
-        d_model = 1024
-        num_heads = 16
-        num_layers = 12
-        d_ff = 4096
+    elif choice == '5':
+        # Low configuration (~600 million parameters)
+        d_model = 1536
+        num_heads = 24
+        num_layers = 16
+        d_ff = 6144
         dropout = 0.1
         learning_rate = 1e-4
-        batch_size = 64
-        beam_width = 3
+        batch_size = 128
         temperature = 0.7
         weight_decay = 1e-5
         grad_clip = 1.0
-    elif choice == '3':
-        # Low-end configuration
+    elif choice == '6':
+        # Ultra Low configuration (~25 million parameters)
         d_model = 512
         num_heads = 8
         num_layers = 6
         d_ff = 2048
         dropout = 0.1
         learning_rate = 1e-4
-        batch_size = 64
-        beam_width = 3
+        batch_size = 256
         temperature = 0.7
         weight_decay = 1e-5
         grad_clip = 1.0
@@ -80,14 +124,14 @@ def select_parameters():
         exit()
 
     # Return the selected configuration
-    return d_model, num_heads, num_layers, d_ff, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip
+    return d_model, num_heads, num_layers, d_ff, dropout, learning_rate, batch_size, temperature, weight_decay, grad_clip
 
 # Call the function to select parameters
-d_model, num_heads, num_layers, d_ff, dropout, learning_rate, batch_size, beam_width, temperature, weight_decay, grad_clip = select_parameters()
+d_model, num_heads, num_layers, d_ff, dropout, learning_rate, batch_size, temperature, weight_decay, grad_clip = select_parameters()
 
-num_epochs = 10
-max_len = 100
-max_seq_length = 300
+num_epochs = 1
+max_len = 65000
+max_seq_length = 25000
 datasetfile = 'data.json'  # Dataset file
 
 # Define the MultiHeadAttention class
@@ -107,8 +151,9 @@ class MultiHeadAttention(nn.Module):
     def scaled_dot_product_attention(self, Q, K, V, mask=None):
         attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / np.sqrt(self.d_k)
         if mask is not None:
-            mask = mask.unsqueeze(0)  # Add a batch dimension if missing
-            attn_scores += mask * -1e9
+            # Make sure the mask has the correct shape: (batch_size, num_heads, seq_len, seq_len)
+            mask = mask.unsqueeze(1).unsqueeze(2)  # Add dimensions for num_heads and seq_len
+            attn_scores = attn_scores + mask  # Assuming mask is of shape (batch_size, 1, seq_len, seq_len)
             
         attn_probs = torch.nn.functional.softmax(attn_scores, dim=-1)
         output = torch.matmul(attn_probs, V)
@@ -415,17 +460,22 @@ model = TransformerModel(vocab_size, d_model=d_model, num_heads=num_heads, num_l
 
 # Count parameters
 total_params = count_parameters(model)
-print(f"Total number of parameters in the model: {total_params / 1e6:.2f} million")
+print(Fore.CYAN + "=" + " " * 126 + "=")
+print(Fore.CYAN + "=" + " " * 26 + Fore.WHITE + f"Total number of parameters in the model: {total_params / 1e6:.2f} million")
 
 # Check if pretrained model exists
 if os.path.exists(model_save_path):
     # Load the pretrained model
-    model.load_state_dict(torch.load(model_save_path))
+    model.load_state_dict(torch.load(model_save_path, weights_only=True))
     model.eval()  # Set the model to evaluation mode after loading
-    print(f"Pretrained model loaded from {model_save_path}")
+    print(Fore.CYAN + "=" + " " * 26 + Fore.WHITE + f"Pretrained model loaded from {model_save_path}" + Fore.CYAN + " " * 49 + "=")
+    print(Fore.CYAN + "=" + " " * 126 + "=")
+    print(Fore.CYAN + "=" * 128 + Fore.WHITE)
 else:
     # Pretrained model not found, start training
-    print("No pretrained model found, starting from scratch.")
+    print(Fore.CYAN + "=" + " " * 26 + Fore.WHITE + "No pretrained model found, starting from scratch." + Fore.CYAN + " " * 51 + "=")
+    print(Fore.CYAN + "=" + " " * 126 + "=")
+    print(Fore.CYAN + "=" * 128 + Fore.WHITE)
     
     # Optimizer and Scheduler
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
