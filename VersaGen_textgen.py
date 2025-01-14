@@ -112,10 +112,10 @@ batch_size = 256
 temperature = 0.7
 weight_decay = 1e-5
 grad_clip = 1.0
-num_epochs = 50
+num_epochs = 1
 max_len = 65000
 max_seq_length = 25000
-datasetfile = 'data.txt'
+datasetfile = '14kdata.txt'
 
 def stop_thread(signum, frame):
     global stop_generation
